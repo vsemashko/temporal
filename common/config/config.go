@@ -636,6 +636,20 @@ type (
 		AuthExtraHeaderName string `yaml:"authExtraHeaderName"`
 		// JWT audience for validating tokens
 		Audience string `yaml:"audience"`
+		// Rate limiting configuration for authentication failures
+		RateLimit AuthRateLimit `yaml:"rateLimit"`
+	}
+
+	// AuthRateLimit contains configuration for authentication rate limiting
+	AuthRateLimit struct {
+		// Enabled controls whether authentication rate limiting is active
+		Enabled bool `yaml:"enabled"`
+		// MaxFailuresPerMinute is the maximum number of auth failures allowed per IP per minute
+		// Defaults to 10 if not specified
+		MaxFailuresPerMinute int `yaml:"maxFailuresPerMinute"`
+		// LockoutDuration is how long to block an IP after exceeding the limit
+		// Defaults to 5m if not specified
+		LockoutDuration time.Duration `yaml:"lockoutDuration"`
 	}
 
 	// @@@SNIPSTART temporal-common-service-config-jwtkeyprovider
