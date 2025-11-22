@@ -237,6 +237,17 @@ ERRORTYPE := $(LOCALBIN)/errortype
 $(ERRORTYPE): | $(LOCALBIN)
 	$(call go-install-tool,$(ERRORTYPE),fillmore-labs.com/errortype,$(ERRORTYPE_VER))
 
+# Security scanning tools
+GOSEC_VER := v2.21.4
+GOSEC := $(LOCALBIN)/gosec-$(GOSEC_VER)
+$(GOSEC): | $(LOCALBIN)
+	$(call go-install-tool,$(GOSEC),github.com/securego/gosec/v2/cmd/gosec,$(GOSEC_VER))
+
+GOVULNCHECK_VER := v1.1.3
+GOVULNCHECK := $(LOCALBIN)/govulncheck-$(GOVULNCHECK_VER)
+$(GOVULNCHECK): | $(LOCALBIN)
+	$(call go-install-tool,$(GOVULNCHECK),golang.org/x/vuln/cmd/govulncheck,$(GOVULNCHECK_VER))
+
 # Mockgen is called by name throughout the codebase, so we need to keep the binary name consistent
 MOCKGEN_VER := v0.6.0
 MOCKGEN := $(LOCALBIN)/mockgen
@@ -414,6 +425,18 @@ workflowcheck: $(WORKFLOWCHECK)
 		echo "Running workflowcheck on $$dir" ; \
 		$(WORKFLOWCHECK) "$$dir" ; \
 	done
+
+# Security scanning targets
+lint-security: lint-gosec lint-govulncheck
+	@printf $(COLOR) "Security scans complete"
+
+lint-gosec: $(GOSEC)
+	@printf $(COLOR) "Running gosec security scanner..."
+	@$(GOSEC) -fmt=text -conf=.gosec.yaml ./...
+
+lint-govulncheck: $(GOVULNCHECK)
+	@printf $(COLOR) "Running govulncheck vulnerability scanner..."
+	@$(GOVULNCHECK) ./...
 
 check: lint shell-check
 

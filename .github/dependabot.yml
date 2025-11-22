@@ -1,0 +1,96 @@
+# Dependabot configuration for Temporal Server
+# https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+
+version: 2
+updates:
+  # Go modules dependency updates
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      # Check for updates weekly on Monday
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Los_Angeles"
+
+    # Grouping strategy to reduce PR noise
+    groups:
+      # Group all minor and patch updates together
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+      # Group security updates separately for priority review
+      security-updates:
+        patterns:
+          - "*"
+        update-types:
+          - "security"
+
+    # Maximum number of open pull requests
+    # Set to reasonable number to avoid overwhelming reviewers
+    open-pull-requests-limit: 10
+
+    # Pull request configuration
+    reviewers:
+      - "temporalio/server-maintainers"
+    labels:
+      - "dependencies"
+      - "automated"
+    commit-message:
+      # Conventional commits format
+      prefix: "deps"
+      include: "scope"
+
+    # Only create PRs for security updates and major version bumps automatically
+    # Let weekly schedule handle minor/patch in groups
+    # This prevents too many individual PRs
+
+  # GitHub Actions workflow dependency updates
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Los_Angeles"
+
+    groups:
+      # Group all GitHub Actions updates together
+      actions:
+        patterns:
+          - "*"
+
+    open-pull-requests-limit: 5
+
+    reviewers:
+      - "temporalio/server-maintainers"
+    labels:
+      - "dependencies"
+      - "github-actions"
+      - "automated"
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+
+# Notes:
+# - Dependabot will automatically create PRs for security vulnerabilities
+# - Security updates take priority and are grouped separately
+# - Minor and patch updates are grouped to reduce PR noise
+# - GitHub Actions are updated separately to maintain CI/CD stability
+# - All PRs include changelog and release notes from upstream
+# - Dependabot respects .gitignore and won't update vendored dependencies
+#
+# Security Vulnerability Handling:
+# - Critical/High: Auto-created PR, reviewed within 24 hours
+# - Medium: Auto-created PR, reviewed within 1 week
+# - Low: Bundled with weekly updates
+#
+# Reviewer Responsibilities:
+# - Review security impact of dependency updates
+# - Check for breaking changes in major version bumps
+# - Validate CI/CD passes before merging
+# - Monitor for compatibility issues

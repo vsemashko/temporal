@@ -191,6 +191,14 @@ type (
 
 		// Requires clients to authenticate with a certificate when connecting, otherwise known as mutual TLS.
 		RequireClientAuth bool `yaml:"requireClientAuth"`
+
+		// MinVersion specifies the minimum TLS version to use. Valid values: "1.2", "1.3"
+		// Defaults to "1.3" for enhanced security. Use "1.2" only for backward compatibility.
+		MinVersion string `yaml:"minVersion"`
+
+		// CipherSuites specifies the list of allowed cipher suites. If empty, uses secure defaults.
+		// Recommended to leave empty unless you have specific requirements.
+		CipherSuites []string `yaml:"cipherSuites"`
 	}
 
 	// ClientTLS contains TLS configuration for clients within the Temporal Cluster to connect to Temporal nodes.
@@ -200,9 +208,12 @@ type (
 		// This name should be referenced by the certificate specified in the ServerTLS section.
 		ServerName string `yaml:"serverName"`
 
-		// If you want to verify the temporal server hostname and server cert, then you should turn this on
-		// This option is basically equivalent to InSecureSkipVerify
-		// See InSecureSkipVerify in http://golang.org/pkg/crypto/tls/ for more info
+		// DisableHostVerification disables TLS hostname verification
+		// SECURITY WARNING: Enabling this option (setting to true) exposes connections to
+		// man-in-the-middle attacks and should ONLY be done in development/testing environments.
+		// When true, this sets InsecureSkipVerify=true which disables certificate hostname validation.
+		// See http://golang.org/pkg/crypto/tls/ InSecureSkipVerify for more info.
+		// DEFAULT: false (host verification enabled) - STRONGLY recommended to keep disabled in production
 		DisableHostVerification bool `yaml:"disableHostVerification"`
 
 		// Optional - A list of paths to files containing the PEM-encoded public key of the Certificate Authorities that are used to validate the server's TLS certificate
@@ -216,6 +227,41 @@ type (
 		// Optional - Use TLS even is neither client certificate nor root CAs are configured
 		// This is for non-mTLS cases when client validates serve against a set of trusted CA certificates configured in the environment
 		ForceTLS bool `yaml:"forceTLS"`
+
+		// MinVersion specifies the minimum TLS version to use. Valid values: "1.2", "1.3"
+		// Defaults to "1.3" for enhanced security. Use "1.2" only for backward compatibility.
+		MinVersion string `yaml:"minVersion"`
+
+		// CipherSuites specifies the list of allowed cipher suites. If empty, uses secure defaults.
+		// Recommended to leave empty unless you have specific requirements.
+		CipherSuites []string `yaml:"cipherSuites"`
+
+		// PinnedCertificates configures certificate pinning for this connection.
+		// Certificate pinning provides additional security by validating against specific
+		// certificate fingerprints, even if the CA is compromised.
+		// SECURITY: This is an advanced feature. Incorrect configuration can break connections.
+		PinnedCertificates CertificatePinning `yaml:"pinnedCertificates"`
+	}
+
+	// CertificatePinning configures certificate pinning for TLS connections
+	CertificatePinning struct {
+		// Enabled determines whether certificate pinning is active
+		Enabled bool `yaml:"enabled"`
+
+		// Fingerprints is a list of SHA-256 fingerprints of pinned certificates
+		// Format: "sha256:AB:CD:EF:..." or "abcdef..." (will be normalized)
+		// Multiple fingerprints support certificate rotation
+		// Example: ["sha256:1234...", "sha256:5678..."]
+		Fingerprints []string `yaml:"fingerprints"`
+
+		// Description provides context about the pinned certificates (optional, for documentation)
+		Description string `yaml:"description"`
+
+		// StrictPinning controls the behavior when validation fails
+		// - true: Fail connection if fingerprint doesn't match (recommended for production)
+		// - false: Log warning but allow connection (useful for testing/migration)
+		// DEFAULT: true
+		StrictPinning bool `yaml:"strictPinning"`
 	}
 
 	// WorkerTLS contains TLS configuration for system workers within the Temporal Cluster to connect to Temporal frontend.
@@ -617,6 +663,20 @@ type (
 		AuthExtraHeaderName string `yaml:"authExtraHeaderName"`
 		// JWT audience for validating tokens
 		Audience string `yaml:"audience"`
+		// Rate limiting configuration for authentication failures
+		RateLimit AuthRateLimit `yaml:"rateLimit"`
+	}
+
+	// AuthRateLimit contains configuration for authentication rate limiting
+	AuthRateLimit struct {
+		// Enabled controls whether authentication rate limiting is active
+		Enabled bool `yaml:"enabled"`
+		// MaxFailuresPerMinute is the maximum number of auth failures allowed per IP per minute
+		// Defaults to 10 if not specified
+		MaxFailuresPerMinute int `yaml:"maxFailuresPerMinute"`
+		// LockoutDuration is how long to block an IP after exceeding the limit
+		// Defaults to 5m if not specified
+		LockoutDuration time.Duration `yaml:"lockoutDuration"`
 	}
 
 	// @@@SNIPSTART temporal-common-service-config-jwtkeyprovider
@@ -669,14 +729,20 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// String converts the config object into a string
+// String converts the config object into a string with all sensitive fields redacted.
+// This ensures that passwords, keys, and tokens are never logged in plaintext.
 func (c *Config) String() string {
-	var buf bytes.Buffer
-	encoder := yaml.NewEncoder(&buf)
-	encoder.SetIndent(2)
-	_ = encoder.Encode(c)
-	maskedYaml, _ := masker.MaskYaml(buf.String(), masker.DefaultYAMLFieldNames)
-	return maskedYaml
+	sanitized, err := SanitizeConfig(c)
+	if err != nil {
+		// Fallback to basic masking if sanitization fails
+		var buf bytes.Buffer
+		encoder := yaml.NewEncoder(&buf)
+		encoder.SetIndent(2)
+		_ = encoder.Encode(c)
+		maskedYaml, _ := masker.MaskYaml(buf.String(), masker.DefaultYAMLFieldNames)
+		return maskedYaml
+	}
+	return sanitized
 }
 
 func (r *GroupTLS) IsServerEnabled() bool {

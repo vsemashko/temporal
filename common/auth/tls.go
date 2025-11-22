@@ -12,9 +12,12 @@ type (
 		KeyFile  string `yaml:"keyFile"`
 		CaFile   string `yaml:"caFile"` // optional depending on server config
 
-		// If you want to verify the hostname and server cert (like a wildcard for cass cluster) then you should turn this on
-		// This option is basically the inverse of InSecureSkipVerify
-		// See InSecureSkipVerify in http://golang.org/pkg/crypto/tls/ for more info
+		// EnableHostVerification controls TLS hostname verification
+		// SECURITY WARNING: Disabling host verification (setting to false) exposes connections to
+		// man-in-the-middle attacks and should ONLY be done in development/testing environments.
+		// When false, this sets InsecureSkipVerify=true which disables certificate hostname validation.
+		// See http://golang.org/pkg/crypto/tls/ InSecureSkipVerify for more info.
+		// DEFAULT: false (host verification disabled) - STRONGLY recommended to set to true in production
 		EnableHostVerification bool `yaml:"enableHostVerification"`
 
 		ServerName string `yaml:"serverName"`

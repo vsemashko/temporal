@@ -94,6 +94,7 @@ var Module = fx.Options(
 	service.PersistenceLazyLoadedServiceResolverModule,
 	fx.Provide(FEReplicatorNamespaceReplicationQueueProvider),
 	fx.Provide(AuthorizationInterceptorProvider),
+	fx.Provide(AuthRateLimitInterceptorProvider),
 	fx.Provide(NamespaceCheckerProvider),
 	fx.Provide(func(so GrpcServerOptions) *grpc.Server { return grpc.NewServer(so.Options...) }),
 	fx.Provide(HandlerProvider),
@@ -174,6 +175,18 @@ func AuthorizationInterceptorProvider(
 	)
 }
 
+func AuthRateLimitInterceptorProvider(
+	cfg *config.Config,
+	logger log.Logger,
+	metricsHandler metrics.Handler,
+) *interceptor.AuthRateLimitInterceptor {
+	return interceptor.NewAuthRateLimitInterceptor(
+		cfg.Global.Authorization.RateLimit,
+		logger,
+		metricsHandler,
+	)
+}
+
 func NamespaceCheckerProvider(registry namespace.Registry) authorization.NamespaceChecker {
 	return &namespaceChecker{r: registry}
 }
@@ -208,6 +221,7 @@ func GrpcServerOptionsProvider(
 	sdkVersionInterceptor *interceptor.SDKVersionInterceptor,
 	callerInfoInterceptor *interceptor.CallerInfoInterceptor,
 	authInterceptor *authorization.Interceptor,
+	authRateLimitInterceptor *interceptor.AuthRateLimitInterceptor,
 	maskInternalErrorDetailsInterceptor *interceptor.MaskInternalErrorDetailsInterceptor,
 	slowRequestLoggerInterceptor *interceptor.SlowRequestLoggerInterceptor,
 	customInterceptors []grpc.UnaryServerInterceptor,
@@ -248,6 +262,7 @@ func GrpcServerOptionsProvider(
 		namespaceValidatorInterceptor.NamespaceValidateIntercept,
 		namespaceLogInterceptor.Intercept, // TODO: Deprecate this with a outer custom interceptor
 		metrics.NewServerMetricsContextInjectorInterceptor(),
+		authRateLimitInterceptor.Intercept, // Rate limit auth failures before auth check
 		authInterceptor.Intercept,
 		// Handover interceptor has to above redirection because the request will route to the correct cluster after handover completed.
 		// And retry cannot be performed before customInterceptors.

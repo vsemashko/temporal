@@ -133,6 +133,26 @@ jobs:
             exit 1
           fi
 
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          check-latest: true
+
+      - name: run gosec security scanner
+        run: |
+          make lint-gosec
+
+      - name: run govulncheck vulnerability scanner
+        run: |
+          make lint-govulncheck
+
   linters-succeed:
     name: All Linters Succeed
     needs:
@@ -141,6 +161,7 @@ jobs:
       - lint-actions
       - fmt-imports
       - golangci
+      - security-scan
     runs-on: ubuntu-latest
     if: always()
     env:

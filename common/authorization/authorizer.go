@@ -62,6 +62,10 @@ func GetAuthorizerFromConfig(config *config.Authorization) (Authorizer, error) {
 
 	switch strings.ToLower(config.Authorizer) {
 	case "":
+		// CRITICAL SECURITY WARNING: Noop authorizer is being used!
+		// This allows ALL requests without any authorization checks.
+		// This should NEVER be used in production environments.
+		// All operations (including admin operations) will be accessible to anyone.
 		return NewNoopAuthorizer(), nil
 	case "default":
 		return NewDefaultAuthorizer(), nil

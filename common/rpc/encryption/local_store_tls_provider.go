@@ -32,6 +32,7 @@ type localStoreTlsProvider struct {
 	workerCertProvider              CertProvider
 	remoteClusterClientCertProvider map[string]CertProvider
 	frontendPerHostCertProviderMap  *localStorePerHostCertProviderMap
+	certificatePinner               *CertificatePinner
 
 	cachedInternodeServerConfig     *tls.Config
 	cachedInternodeClientConfig     *tls.Config
@@ -65,6 +66,27 @@ func NewLocalStoreTlsProvider(tlsConfig *config.RootTLS, metricsHandler metrics.
 		remoteClusterClientCertProvider[hostname] = certProviderFactory(&groupTLS, nil, nil, tlsConfig.RefreshInterval, logger)
 	}
 
+	// Initialize certificate pinning for remote clusters
+	certPinConfig := make(map[string]PinConfig)
+	for hostname, groupTLS := range tlsConfig.RemoteClusters {
+		if groupTLS.Client.PinnedCertificates.Enabled {
+			certPinConfig[hostname] = PinConfig{
+				Fingerprints:  groupTLS.Client.PinnedCertificates.Fingerprints,
+				Description:   groupTLS.Client.PinnedCertificates.Description,
+				StrictPinning: groupTLS.Client.PinnedCertificates.StrictPinning,
+			}
+		}
+	}
+	var certPinner *CertificatePinner
+	if len(certPinConfig) > 0 {
+		certPinner = NewCertificatePinner(certPinConfig, logger, metricsHandler)
+		logger.Info("Certificate pinning enabled for remote clusters",
+			tag.NewIntTag("cluster_count", len(certPinConfig)))
+
+		// Emit metric for configured clusters
+		metricsHandler.Gauge(metrics.CertPinConfiguredClusters.Name()).Record(float64(len(certPinConfig)))
+	}
+
 	provider := &localStoreTlsProvider{
 		internodeCertProvider:       internodeProvider,
 		internodeClientCertProvider: internodeProvider,
@@ -73,6 +95,7 @@ func NewLocalStoreTlsProvider(tlsConfig *config.RootTLS, metricsHandler metrics.
 		frontendPerHostCertProviderMap: newLocalStorePerHostCertProviderMap(
 			tlsConfig.Frontend.PerHostOverrides, certProviderFactory, tlsConfig.RefreshInterval, logger),
 		remoteClusterClientCertProvider: remoteClusterClientCertProvider,
+		certificatePinner:               certPinner,
 		RWMutex:                         sync.RWMutex{},
 		settings:                        tlsConfig,
 		metricsHandler:                  metricsHandler,
@@ -147,12 +170,32 @@ func (s *localStoreTlsProvider) GetRemoteClusterClientConfig(hostname string) (*
 	return s.getOrCreateRemoteClusterClientConfig(
 		hostname,
 		func() (*tls.Config, error) {
-			return newClientTLSConfig(
+			tlsConfig, err := newClientTLSConfig(
 				s.remoteClusterClientCertProvider[hostname],
 				groupTLS.Client.ServerName,
 				groupTLS.Server.RequireClientAuth,
 				false,
 				!groupTLS.Client.DisableHostVerification)
+
+			if err != nil {
+				return nil, err
+			}
+
+			// Add certificate pinning if configured
+			if s.certificatePinner != nil && groupTLS.Client.PinnedCertificates.Enabled {
+				strictMode := groupTLS.Client.PinnedCertificates.StrictPinning
+				tlsConfig.VerifyPeerCertificate = s.certificatePinner.CreateVerifyPeerCertificate(
+					hostname,
+					strictMode,
+				)
+
+				s.logger.Info("Certificate pinning configured for remote cluster",
+					tag.NewStringTag("cluster", hostname),
+					tag.NewBoolTag("strict_mode", strictMode),
+					tag.NewIntTag("pinned_certs", len(groupTLS.Client.PinnedCertificates.Fingerprints)))
+			}
+
+			return tlsConfig, nil
 		},
 		groupTLS.IsClientEnabled(),
 	)

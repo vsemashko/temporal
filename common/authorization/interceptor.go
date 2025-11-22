@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"go.temporal.io/api/serviceerror"
+	"go.temporal.io/server/common/audit"
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/headers"
 	"go.temporal.io/server/common/log"
@@ -86,6 +87,7 @@ type Interceptor struct {
 	authHeaderName         string
 	authExtraHeaderName    string
 	exposeAuthorizerErrors dynamicconfig.BoolPropertyFn
+	auditLogger            audit.Logger
 }
 
 // NewInterceptor creates an authorization interceptor.
@@ -100,6 +102,38 @@ func NewInterceptor(
 	authExtraHeaderName string,
 	exposeAuthorizerErrors dynamicconfig.BoolPropertyFn,
 ) *Interceptor {
+	return NewInterceptorWithAuditLogger(
+		claimMapper,
+		authorizer,
+		metricsHandler,
+		logger,
+		namespaceChecker,
+		audienceGetter,
+		authHeaderName,
+		authExtraHeaderName,
+		exposeAuthorizerErrors,
+		nil, // Default to noop audit logger
+	)
+}
+
+// NewInterceptorWithAuditLogger creates an authorization interceptor with audit logging.
+func NewInterceptorWithAuditLogger(
+	claimMapper ClaimMapper,
+	authorizer Authorizer,
+	metricsHandler metrics.Handler,
+	logger log.Logger,
+	namespaceChecker NamespaceChecker,
+	audienceGetter JWTAudienceMapper,
+	authHeaderName string,
+	authExtraHeaderName string,
+	exposeAuthorizerErrors dynamicconfig.BoolPropertyFn,
+	auditLogger audit.Logger,
+) *Interceptor {
+	// Default to noop audit logger if not provided
+	if auditLogger == nil {
+		auditLogger = audit.NewNoopLogger()
+	}
+
 	return &Interceptor{
 		claimMapper:            claimMapper,
 		authorizer:             authorizer,
@@ -110,6 +144,7 @@ func NewInterceptor(
 		authExtraHeaderName:    cmp.Or(authExtraHeaderName, defaultAuthExtraHeaderName),
 		audienceGetter:         audienceGetter,
 		exposeAuthorizerErrors: exposeAuthorizerErrors,
+		auditLogger:            auditLogger,
 	}
 }
 
@@ -223,9 +258,17 @@ func (a *Interceptor) Authorize(ctx context.Context, claims *Claims, ct *CallTar
 	startTime := time.Now().UTC()
 	result, err := a.authorizer.Authorize(ctx, claims, ct)
 	metrics.ServiceAuthorizationLatency.With(mh).Record(time.Since(startTime))
+
+	// Create audit event for this authorization decision
+	auditEvent := a.createAuditEvent(ctx, claims, ct, result, err)
+
 	if err != nil {
 		metrics.ServiceErrAuthorizeFailedCounter.With(mh).Record(1)
 		a.logger.Error("Authorization error", tag.Error(err))
+
+		// Log audit event for authorization error
+		a.auditLogger.LogAuthZ(ctx, auditEvent)
+
 		if a.exposeAuthorizerErrors() {
 			return err
 		}
@@ -233,13 +276,85 @@ func (a *Interceptor) Authorize(ctx context.Context, claims *Claims, ct *CallTar
 	}
 	if result.Decision != DecisionAllow {
 		metrics.ServiceErrUnauthorizedCounter.With(mh).Record(1)
+
+		// Log audit event for denied request
+		a.auditLogger.LogAuthZ(ctx, auditEvent)
+
 		// if a reason is included in the result, include it in the error message
 		if result.Reason != "" {
 			return serviceerror.NewPermissionDenied(RequestUnauthorized, result.Reason)
 		}
 		return errUnauthorized // return a generic error to the caller without disclosing details
 	}
+
+	// Log audit event for successful authorization
+	a.auditLogger.LogAuthZ(ctx, auditEvent)
+
 	return nil
+}
+
+// createAuditEvent creates an audit event from the authorization context
+func (a *Interceptor) createAuditEvent(
+	ctx context.Context,
+	claims *Claims,
+	ct *CallTarget,
+	result Result,
+	authzError error,
+) *audit.Event {
+	event := &audit.Event{
+		Timestamp: time.Now().UTC(),
+		APIName:   ct.APIName,
+		Namespace: ct.Namespace,
+		Metadata:  make(map[string]interface{}),
+	}
+
+	// Extract user ID from claims
+	if claims != nil && claims.Subject != "" {
+		event.UserID = claims.Subject
+	}
+
+	// Extract source IP from context
+	if p, ok := peer.FromContext(ctx); ok && p.Addr != nil {
+		event.SourceIP = p.Addr.String()
+	}
+
+	// Set event type and decision based on result
+	if authzError != nil {
+		event.EventType = audit.EventTypeAuthZFailure
+		event.Decision = audit.DecisionDeny
+		event.Reason = "Authorization error: " + authzError.Error()
+	} else if result.Decision == DecisionAllow {
+		event.EventType = audit.EventTypeAuthZSuccess
+		event.Decision = audit.DecisionAllow
+		event.Reason = result.Reason
+	} else {
+		event.EventType = audit.EventTypeAuthZFailure
+		event.Decision = audit.DecisionDeny
+		event.Reason = result.Reason
+	}
+
+	// Add role information from claims
+	if claims != nil {
+		event.SystemRole = claims.System.String()
+		if nsRole, ok := claims.Namespaces[ct.Namespace]; ok && nsRole != RoleUndefined {
+			event.NamespaceRole = nsRole.String()
+		}
+
+		// Add additional metadata
+		if claims.Subject != "" {
+			event.Metadata["subject"] = claims.Subject
+		}
+		if len(claims.Groups) > 0 {
+			event.Metadata["groups"] = claims.Groups
+		}
+	}
+
+	// Add NexusEndpointName if present
+	if ct.NexusEndpointName != "" {
+		event.Metadata["nexus_endpoint"] = ct.NexusEndpointName
+	}
+
+	return event
 }
 
 // getMetricsHandler returns a metrics handler with a namespace tag
