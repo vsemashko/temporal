@@ -222,6 +222,257 @@ persistence:
           keyFile: /etc/temporal/certs/postgres-client-key.pem
 ```
 
+### Certificate Pinning for Remote Clusters
+
+**NEW: Phase 2 Enhancement**
+
+Certificate pinning provides defense-in-depth security for remote cluster connections by validating that certificates match expected SHA-256 fingerprints. This protects against compromised Certificate Authorities and man-in-the-middle attacks.
+
+#### How It Works
+
+Certificate pinning validates the SHA-256 fingerprint of the leaf certificate presented by remote clusters:
+
+1. **Fingerprint Calculation**: SHA-256 hash of the certificate's DER encoding
+2. **Validation**: Compare against configured fingerprints for the cluster
+3. **Strict Mode**: Reject connections if fingerprint doesn't match
+4. **Non-Strict Mode**: Log warnings but allow connections (useful during migrations)
+5. **Multiple Pins**: Support multiple fingerprints for rotation scenarios
+
+#### Configuration
+
+```yaml
+global:
+  tls:
+    remoteClusters:
+      cluster1.example.com:
+        client:
+          serverName: "cluster1.example.com"
+          rootCaFiles:
+            - /etc/temporal/certs/ca.pem
+
+          # Certificate pinning configuration
+          pinnedCertificates:
+            # Enable certificate pinning
+            enabled: true
+
+            # Strict mode: reject connections on mismatch
+            # Set to false during certificate rotation
+            strictPinning: true
+
+            # Expected certificate fingerprints (SHA-256)
+            fingerprints:
+              - "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              - "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35"
+
+            # Optional: description for documentation
+            description: "Production cluster1 certificates (expires 2026-12-31)"
+```
+
+#### Getting Certificate Fingerprints
+
+**From a running server:**
+
+```bash
+# Get fingerprint from remote cluster
+echo | openssl s_client -connect cluster1.example.com:7233 2>/dev/null | \
+  openssl x509 -noout -fingerprint -sha256 | \
+  cut -d= -f2 | tr -d ':' | tr '[:upper:]' '[:lower:]'
+```
+
+**From a certificate file:**
+
+```bash
+# Get fingerprint from local certificate file
+openssl x509 -in /etc/temporal/certs/cluster1.pem -noout -fingerprint -sha256 | \
+  cut -d= -f2 | tr -d ':' | tr '[:upper:]' '[:lower:]'
+```
+
+**Using the helper function (formatted output):**
+
+```bash
+# The FormatFingerprint function in code produces: SHA256:E3:B0:C4:42:...
+# This is human-readable but config expects normalized format (lowercase hex)
+```
+
+#### Operating Modes
+
+**Strict Mode (Production):**
+
+```yaml
+pinnedCertificates:
+  enabled: true
+  strictPinning: true  # Reject connections on mismatch
+  fingerprints:
+    - "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+```
+
+- **Behavior**: Connection fails if certificate doesn't match
+- **Use Case**: Production environments with stable certificates
+- **Security**: Maximum protection
+
+**Non-Strict Mode (Migration):**
+
+```yaml
+pinnedCertificates:
+  enabled: true
+  strictPinning: false  # Log warnings but allow connections
+  fingerprints:
+    - "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+```
+
+- **Behavior**: Logs warning if certificate doesn't match, but allows connection
+- **Use Case**: Certificate rotation, testing, migration
+- **Security**: Detection without service disruption
+
+#### Certificate Rotation with Pinning
+
+When rotating certificates on remote clusters:
+
+**Phase 1: Add New Fingerprint**
+
+```yaml
+pinnedCertificates:
+  enabled: true
+  strictPinning: true
+  fingerprints:
+    - "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"  # Old
+    - "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35"  # New
+```
+
+**Phase 2: Rotate Certificate on Remote Cluster**
+
+Deploy new certificate to `cluster1.example.com`. Both fingerprints are valid, so no disruption.
+
+**Phase 3: Remove Old Fingerprint (After 7 Days)**
+
+```yaml
+pinnedCertificates:
+  enabled: true
+  strictPinning: true
+  fingerprints:
+    - "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35"  # New only
+  description: "Rotated on 2025-11-22, remove old pin on 2025-11-29"
+```
+
+#### Monitoring
+
+**Prometheus Metrics:**
+
+```promql
+# Successful validations
+rate(temporal_cert_pin_validation_success[5m])
+
+# Failed validations (investigate immediately)
+rate(temporal_cert_pin_validation_failure[5m])
+
+# Number of clusters with pinning configured
+temporal_cert_pin_configured_clusters
+```
+
+**Alerting Rules:**
+
+```yaml
+- alert: CertificatePinValidationFailure
+  expr: rate(temporal_cert_pin_validation_failure[5m]) > 0
+  for: 1m
+  annotations:
+    summary: "Certificate pin validation failures detected"
+    description: "Cluster {{ $labels.cluster }} has certificate mismatches"
+```
+
+#### Troubleshooting
+
+**"Certificate pin validation failed for cluster X"**
+
+```bash
+# Check current certificate fingerprint
+echo | openssl s_client -connect clusterX.example.com:7233 2>/dev/null | \
+  openssl x509 -noout -fingerprint -sha256
+
+# Compare with configured fingerprints in config
+grep -A 5 "clusterX.example.com" /etc/temporal/config.yaml
+```
+
+**Common Causes:**
+- Certificate was rotated but fingerprint not updated
+- Certificate changed unexpectedly (investigate for security breach)
+- Fingerprint format mismatch (must be lowercase hex, no colons)
+
+**Resolution:**
+1. Verify certificate change was authorized
+2. Get current certificate fingerprint
+3. Update configuration with new fingerprint
+4. If using strict mode and need immediate fix, temporarily switch to `strictPinning: false`
+
+#### Security Considerations
+
+**When to Enable:**
+- ✅ High-security environments
+- ✅ Connections to sensitive remote clusters
+- ✅ Compliance requirements (PCI-DSS, HIPAA, SOC 2)
+- ✅ Defense against compromised CAs
+
+**When to Use Non-Strict Mode:**
+- ⚠️ During certificate rotation periods
+- ⚠️ Testing new certificate deployments
+- ⚠️ Migrating between Certificate Authorities
+- ⚠️ Initial deployment validation
+
+**Best Practices:**
+- 📌 Always configure at least 2 fingerprints (current + backup)
+- 📌 Update fingerprints 7 days before certificate expiration
+- 📌 Use strict mode in production after validation
+- 📌 Monitor metrics for validation failures
+- 📌 Document fingerprint rotation in description field
+- 📌 Test pinning in staging first
+
+#### Example: Multi-Cluster Deployment
+
+```yaml
+global:
+  tls:
+    remoteClusters:
+      # Production cluster in US-East
+      prod-us-east.temporal.io:
+        client:
+          serverName: "prod-us-east.temporal.io"
+          rootCaFiles:
+            - /etc/temporal/certs/ca.pem
+          pinnedCertificates:
+            enabled: true
+            strictPinning: true
+            fingerprints:
+              - "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              - "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35"
+            description: "US-East production (expires 2026-06-01)"
+
+      # Production cluster in EU-West
+      prod-eu-west.temporal.io:
+        client:
+          serverName: "prod-eu-west.temporal.io"
+          rootCaFiles:
+            - /etc/temporal/certs/ca.pem
+          pinnedCertificates:
+            enabled: true
+            strictPinning: true
+            fingerprints:
+              - "a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456"
+            description: "EU-West production (expires 2026-08-15)"
+
+      # Staging cluster (non-strict during active development)
+      staging.temporal.io:
+        client:
+          serverName: "staging.temporal.io"
+          rootCaFiles:
+            - /etc/temporal/certs/ca.pem
+          pinnedCertificates:
+            enabled: true
+            strictPinning: false  # Allow rotation without disruption
+            fingerprints:
+              - "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+            description: "Staging cluster (non-strict for testing)"
+```
+
 ---
 
 ## Authorization Configuration

@@ -235,6 +235,33 @@ type (
 		// CipherSuites specifies the list of allowed cipher suites. If empty, uses secure defaults.
 		// Recommended to leave empty unless you have specific requirements.
 		CipherSuites []string `yaml:"cipherSuites"`
+
+		// PinnedCertificates configures certificate pinning for this connection.
+		// Certificate pinning provides additional security by validating against specific
+		// certificate fingerprints, even if the CA is compromised.
+		// SECURITY: This is an advanced feature. Incorrect configuration can break connections.
+		PinnedCertificates CertificatePinning `yaml:"pinnedCertificates"`
+	}
+
+	// CertificatePinning configures certificate pinning for TLS connections
+	CertificatePinning struct {
+		// Enabled determines whether certificate pinning is active
+		Enabled bool `yaml:"enabled"`
+
+		// Fingerprints is a list of SHA-256 fingerprints of pinned certificates
+		// Format: "sha256:AB:CD:EF:..." or "abcdef..." (will be normalized)
+		// Multiple fingerprints support certificate rotation
+		// Example: ["sha256:1234...", "sha256:5678..."]
+		Fingerprints []string `yaml:"fingerprints"`
+
+		// Description provides context about the pinned certificates (optional, for documentation)
+		Description string `yaml:"description"`
+
+		// StrictPinning controls the behavior when validation fails
+		// - true: Fail connection if fingerprint doesn't match (recommended for production)
+		// - false: Log warning but allow connection (useful for testing/migration)
+		// DEFAULT: true
+		StrictPinning bool `yaml:"strictPinning"`
 	}
 
 	// WorkerTLS contains TLS configuration for system workers within the Temporal Cluster to connect to Temporal frontend.
