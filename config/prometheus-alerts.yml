@@ -1,0 +1,412 @@
+# Temporal Server - Security & Operational Alerting Rules
+#
+# This file contains Prometheus alerting rules for monitoring
+# security events and operational health of Temporal Server.
+#
+# Installation:
+# 1. Copy to Prometheus alertmanager configuration directory
+# 2. Add to prometheus.yml:
+#    rule_files:
+#      - "prometheus-alerts.yml"
+# 3. Reload Prometheus configuration
+#
+# Reference: SECURITY_OPERATOR_GUIDE.md
+
+groups:
+  - name: temporal_security_critical
+    interval: 30s
+    rules:
+      # ============================================================================
+      # CRITICAL SECURITY ALERTS
+      # ============================================================================
+
+      - alert: HighAuthenticationFailureRate
+        expr: rate(service_authentication_failures[5m]) > 10
+        for: 5m
+        labels:
+          severity: critical
+          component: authentication
+          team: security
+        annotations:
+          summary: "High authentication failure rate detected"
+          description: "Authentication failures: {{ $value | humanize }} failures/sec over the last 5 minutes. Possible brute force attack in progress."
+          runbook: "https://docs.temporal.io/security/incident-response#auth-failures"
+          action: |
+            1. Check auth_failure logs for source IPs
+            2. Verify rate limiting is enabled
+            3. Consider blocking source IPs at firewall
+            4. Investigate for credential stuffing attacks
+
+      - alert: NamespaceIsolationViolation
+        expr: service_namespace_isolation_violations > 0
+        for: 1m
+        labels:
+          severity: critical
+          component: authorization
+          team: security
+        annotations:
+          summary: "Namespace isolation violation detected"
+          description: "{{ $value }} cross-namespace access attempts detected. Possible privilege escalation attack."
+          runbook: "https://docs.temporal.io/security/incident-response#namespace-violations"
+          action: |
+            1. Immediately review audit logs for violating user/IP
+            2. Check if legitimate admin operation or attack
+            3. Revoke compromised credentials if attack confirmed
+            4. Review RBAC policies for misconfigurations
+
+      - alert: CertificatePinningFailure
+        expr: rate(cert_pin_validation_failure[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          component: tls
+          team: security
+        annotations:
+          summary: "Certificate pinning validation failure"
+          description: "Certificate pinning failed for remote cluster. Possible MITM attack or certificate rotation issue."
+          runbook: "https://docs.temporal.io/security/cert-pinning#failures"
+          action: |
+            1. IMMEDIATELY investigate remote cluster connections
+            2. Verify remote cluster certificate hasn't changed unexpectedly
+            3. Check for man-in-the-middle attack indicators
+            4. If legitimate cert rotation, update pinned fingerprints
+
+      - alert: SecurityScannerFindingsCritical
+        expr: service_security_scanner_findings{severity="critical"} > 0
+        for: 5m
+        labels:
+          severity: critical
+          component: ci_cd
+          team: security
+        annotations:
+          summary: "Critical security findings in latest scan"
+          description: "{{ $value }} critical security vulnerabilities detected in codebase or dependencies."
+          runbook: "https://docs.temporal.io/security/vulnerability-management"
+          action: |
+            1. Review security scan results immediately
+            2. Identify affected components
+            3. Apply patches or workarounds within 24 hours
+            4. Re-scan to verify remediation
+
+  - name: temporal_security_high
+    interval: 60s
+    rules:
+      # ============================================================================
+      # HIGH PRIORITY SECURITY ALERTS
+      # ============================================================================
+
+      - alert: HighAuthorizationFailureRate
+        expr: sum(rate(service_authorization_failures[5m])) by (namespace) > 50
+        for: 10m
+        labels:
+          severity: high
+          component: authorization
+          team: security
+        annotations:
+          summary: "High authorization failure rate in namespace {{ $labels.namespace }}"
+          description: "Authorization failures: {{ $value | humanize }}/sec in namespace {{ $labels.namespace }}. Possible unauthorized access attempts."
+          runbook: "https://docs.temporal.io/security/incident-response#authz-failures"
+
+      - alert: TLSHandshakeFailures
+        expr: rate(service_tls_handshake_failures[5m]) > 5
+        for: 5m
+        labels:
+          severity: high
+          component: tls
+          team: security
+        annotations:
+          summary: "High TLS handshake failure rate"
+          description: "TLS handshake failures: {{ $value | humanize }}/sec. Possible TLS downgrade attack or misconfiguration."
+          runbook: "https://docs.temporal.io/security/tls-troubleshooting"
+
+      - alert: JWTValidationFailures
+        expr: rate(service_jwt_validation_failures[5m]) > 10
+        for: 5m
+        labels:
+          severity: high
+          component: authentication
+          team: security
+        annotations:
+          summary: "High JWT validation failure rate"
+          description: "JWT validation failures: {{ $value | humanize }}/sec. Possible token forgery attempts."
+          runbook: "https://docs.temporal.io/security/jwt-troubleshooting"
+
+      - alert: CertificateExpiringSoon
+        expr: service_cert_expiry_days < 30
+        for: 1h
+        labels:
+          severity: high
+          component: tls
+          team: security
+        annotations:
+          summary: "TLS certificate expiring in {{ $value }} days"
+          description: "Certificate for {{ $labels.cert_name }} expires in {{ $value }} days. Plan rotation immediately."
+          runbook: "https://docs.temporal.io/operations/certificate-rotation"
+          action: |
+            1. Review certificate expiration date
+            2. Follow zero-downtime rotation procedure
+            3. Update monitoring after rotation
+            4. Verify new certificate valid
+
+      - alert: SecretsNotRotated
+        expr: service_secret_rotation_age_days > 90
+        for: 1d
+        labels:
+          severity: high
+          component: secrets
+          team: security
+        annotations:
+          summary: "Secrets not rotated in {{ $value }} days"
+          description: "{{ $labels.secret_type }} has not been rotated in {{ $value }} days. Rotation required for compliance."
+          runbook: "https://docs.temporal.io/operations/secrets-rotation"
+
+  - name: temporal_security_medium
+    interval: 120s
+    rules:
+      # ============================================================================
+      # MEDIUM PRIORITY SECURITY ALERTS
+      # ============================================================================
+
+      - alert: RateLimitExceededFrequently
+        expr: sum(rate(service_rate_limit_exceeded[5m])) by (namespace) > 100
+        for: 15m
+        labels:
+          severity: warning
+          component: rate_limiting
+          team: platform
+        annotations:
+          summary: "Namespace {{ $labels.namespace }} hitting rate limits frequently"
+          description: "Rate limit exceeded {{ $value | humanize }} times/sec. May indicate abuse or insufficient limits."
+          runbook: "https://docs.temporal.io/operations/rate-limiting"
+
+      - alert: AuditLogVolumeHigh
+        expr: rate(service_audit_log_events[5m]) > 1000
+        for: 30m
+        labels:
+          severity: warning
+          component: audit
+          team: platform
+        annotations:
+          summary: "High audit log volume"
+          description: "Audit events: {{ $value | humanize }}/sec. Verify log retention and storage capacity."
+          runbook: "https://docs.temporal.io/operations/audit-logging#capacity"
+
+      - alert: ConfigValidationErrors
+        expr: rate(service_config_validation_errors[5m]) > 1
+        for: 10m
+        labels:
+          severity: warning
+          component: configuration
+          team: platform
+        annotations:
+          summary: "Configuration validation errors detected"
+          description: "{{ $value }} configuration errors/sec. Review recent config changes."
+
+      - alert: mTLSVerificationFailures
+        expr: rate(service_mTLS_verification_failures[5m]) > 5
+        for: 10m
+        labels:
+          severity: warning
+          component: tls
+          team: security
+        annotations:
+          summary: "Client certificate verification failures"
+          description: "mTLS verification failures: {{ $value | humanize }}/sec. Review client certificates."
+
+  - name: temporal_operational_critical
+    interval: 30s
+    rules:
+      # ============================================================================
+      # CRITICAL OPERATIONAL ALERTS
+      # ============================================================================
+
+      - alert: ServiceDown
+        expr: up{job="temporal"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: availability
+          team: sre
+        annotations:
+          summary: "Temporal service {{ $labels.instance }} is down"
+          description: "Service has been down for more than 1 minute. Immediate attention required."
+          runbook: "https://docs.temporal.io/operations/incident-response#service-down"
+
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          component: availability
+          team: sre
+        annotations:
+          summary: "High error rate detected"
+          description: "Error rate: {{ $value | humanizePercentage }}. Threshold: 5%."
+          runbook: "https://docs.temporal.io/operations/troubleshooting#high-errors"
+
+      - alert: HighLatency
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 0.5
+        for: 10m
+        labels:
+          severity: critical
+          component: performance
+          team: sre
+        annotations:
+          summary: "High P95 latency detected"
+          description: "P95 latency: {{ $value | humanizeDuration }}. Threshold: 500ms."
+          runbook: "https://docs.temporal.io/operations/performance-troubleshooting"
+
+      - alert: ReplicationLagHigh
+        expr: replication_lag_seconds > 60
+        for: 5m
+        labels:
+          severity: critical
+          component: replication
+          team: sre
+        annotations:
+          summary: "Replication lag exceeds 60 seconds"
+          description: "Replication lag: {{ $value | humanizeDuration }} for cluster {{ $labels.cluster }}."
+          runbook: "https://docs.temporal.io/operations/replication-troubleshooting"
+
+  - name: temporal_operational_high
+    interval: 60s
+    rules:
+      # ============================================================================
+      # HIGH PRIORITY OPERATIONAL ALERTS
+      # ============================================================================
+
+      - alert: HighMemoryUsage
+        expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes > 0.85
+        for: 10m
+        labels:
+          severity: high
+          component: resources
+          team: sre
+        annotations:
+          summary: "High memory usage on {{ $labels.instance }}"
+          description: "Memory usage: {{ $value | humanizePercentage }}. Threshold: 85%."
+
+      - alert: HighCPUUsage
+        expr: 100 - (avg by (instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 15m
+        labels:
+          severity: high
+          component: resources
+          team: sre
+        annotations:
+          summary: "High CPU usage on {{ $labels.instance }}"
+          description: "CPU usage: {{ $value | humanize }}%. Threshold: 80%."
+
+      - alert: DiskSpaceRunningOut
+        expr: (node_filesystem_avail_bytes / node_filesystem_size_bytes) < 0.15
+        for: 10m
+        labels:
+          severity: high
+          component: storage
+          team: sre
+        annotations:
+          summary: "Disk space running low on {{ $labels.instance }}"
+          description: "Available disk space: {{ $value | humanizePercentage }}. Threshold: 15%."
+
+      - alert: TaskQueueDepthHigh
+        expr: task_queue_depth > 10000
+        for: 15m
+        labels:
+          severity: high
+          component: matching
+          team: platform
+        annotations:
+          summary: "Task queue depth exceeds 10,000"
+          description: "Task queue {{ $labels.task_queue }} has {{ $value }} pending tasks."
+
+      - alert: ContextTimeoutExceededFrequently
+        expr: sum(rate(service_request_timeout_exceeded[5m])) by (rpc_method) / sum(rate(service_request_timeout_enforced[5m])) by (rpc_method) > 0.1
+        for: 10m
+        labels:
+          severity: high
+          component: performance
+          team: platform
+        annotations:
+          summary: "Method {{ $labels.rpc_method }} timing out frequently"
+          description: "Timeout rate: {{ $value | humanizePercentage }} for {{ $labels.rpc_method }}. Review method timeout configuration."
+
+  - name: temporal_operational_medium
+    interval: 300s
+    rules:
+      # ============================================================================
+      # MEDIUM PRIORITY OPERATIONAL ALERTS
+      # ============================================================================
+
+      - alert: DatabaseConnectionPoolExhausted
+        expr: database_connection_pool_active / database_connection_pool_max > 0.9
+        for: 15m
+        labels:
+          severity: warning
+          component: database
+          team: platform
+        annotations:
+          summary: "Database connection pool near exhaustion"
+          description: "Connection pool usage: {{ $value | humanizePercentage }}. Consider increasing pool size."
+
+      - alert: GoroutineCountHigh
+        expr: go_goroutines > 10000
+        for: 30m
+        labels:
+          severity: warning
+          component: runtime
+          team: platform
+        annotations:
+          summary: "High goroutine count on {{ $labels.instance }}"
+          description: "Goroutine count: {{ $value }}. Possible goroutine leak."
+
+      - alert: GarbageCollectionPauses
+        expr: rate(go_gc_duration_seconds_sum[5m]) > 0.01
+        for: 15m
+        labels:
+          severity: warning
+          component: runtime
+          team: platform
+        annotations:
+          summary: "High GC pause time"
+          description: "GC pause time: {{ $value | humanizeDuration }}/sec. Review memory allocation patterns."
+
+# ============================================================================
+# ALERTMANAGER ROUTING CONFIGURATION
+# ============================================================================
+#
+# Add to alertmanager.yml:
+#
+# route:
+#   group_by: ['alertname', 'cluster', 'service']
+#   group_wait: 10s
+#   group_interval: 10s
+#   repeat_interval: 12h
+#   receiver: 'team-pager'
+#   routes:
+#     - match:
+#         severity: critical
+#       receiver: 'pagerduty-critical'
+#       continue: true
+#     - match:
+#         severity: high
+#       receiver: 'pagerduty-high'
+#       continue: true
+#     - match:
+#         severity: warning
+#       receiver: 'slack-warnings'
+#
+# receivers:
+#   - name: 'pagerduty-critical'
+#     pagerduty_configs:
+#       - service_key: '<pagerduty-integration-key>'
+#         severity: 'critical'
+#   - name: 'pagerduty-high'
+#     pagerduty_configs:
+#       - service_key: '<pagerduty-integration-key>'
+#         severity: 'high'
+#   - name: 'slack-warnings'
+#     slack_configs:
+#       - api_url: '<slack-webhook-url>'
+#         channel: '#temporal-alerts'
+#         title: 'Temporal Alert'
+#         text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'

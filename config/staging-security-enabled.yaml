@@ -1,0 +1,312 @@
+# Temporal Server - Staging Configuration with Security Features Enabled
+#
+# This configuration enables all Phase 1-3 security enhancements for staging deployment.
+# Use this configuration to test security features before production rollout.
+#
+# Reference: PROJECT_IMPLEMENTATION_ROADMAP.md (Week 1-2)
+# Documentation: SECURITY_OPERATOR_GUIDE.md
+
+log:
+  stdout: true
+  level: info
+  # Enable structured logging for audit events
+  format: json
+
+persistence:
+  defaultStore: postgres-default
+  visibilityStore: postgres-visibility
+  numHistoryShards: 4
+  datastores:
+    postgres-default:
+      sql:
+        user: "temporal"
+        password: "temporal"  # Use secrets manager in production
+        pluginName: "postgres12"
+        databaseName: "temporal"
+        connectAddr: "postgresql.staging.example.com:5432"
+        connectProtocol: "tcp"
+        connectAttributes:
+          sslmode: "require"
+        maxConns: 20
+        maxIdleConns: 20
+        maxConnLifetime: "1h"
+        tls:
+          enabled: true
+          caFile: "/etc/temporal/certs/ca.pem"
+          certFile: "/etc/temporal/certs/client.pem"
+          keyFile: "/etc/temporal/certs/client-key.pem"
+          enableHostVerification: true
+          serverName: "postgresql.staging.example.com"
+
+    postgres-visibility:
+      sql:
+        user: "temporal"
+        password: "temporal"  # Use secrets manager in production
+        pluginName: "postgres12"
+        databaseName: "temporal_visibility"
+        connectAddr: "postgresql.staging.example.com:5432"
+        connectProtocol: "tcp"
+        connectAttributes:
+          sslmode: "require"
+        maxConns: 10
+        maxIdleConns: 10
+        maxConnLifetime: "1h"
+        tls:
+          enabled: true
+          caFile: "/etc/temporal/certs/ca.pem"
+          certFile: "/etc/temporal/certs/client.pem"
+          keyFile: "/etc/temporal/certs/client-key.pem"
+          enableHostVerification: true
+          serverName: "postgresql.staging.example.com"
+
+global:
+  membership:
+    maxJoinDuration: 30s
+    broadcastAddress: "temporal-frontend.staging.example.com"
+
+  pprof:
+    port: 7936
+
+  metrics:
+    prometheus:
+      framework: "opentelemetry"
+      timerType: "histogram"
+      listenAddress: "0.0.0.0:8000"
+
+  # ============================================================================
+  # SECURITY CONFIGURATION - Phase 1-3 Features Enabled
+  # ============================================================================
+
+  # TLS Configuration (Phase 1)
+  tls:
+    # Enforce TLS 1.3 minimum
+    minVersion: "1.3"
+
+    # FIPS-compliant cipher suites
+    cipherSuites:
+      - "TLS_AES_128_GCM_SHA256"
+      - "TLS_AES_256_GCM_SHA384"
+      - "TLS_CHACHA20_POLY1305_SHA256"
+
+    # Frontend service TLS
+    frontend:
+      server:
+        certFile: "/etc/temporal/certs/frontend-server.pem"
+        keyFile: "/etc/temporal/certs/frontend-server-key.pem"
+        clientCaFiles:
+          - "/etc/temporal/certs/ca.pem"
+        requireClientAuth: true  # mTLS enabled
+
+      client:
+        serverName: "temporal-frontend.staging.example.com"
+        rootCaFiles:
+          - "/etc/temporal/certs/ca.pem"
+
+    # Inter-service TLS
+    internode:
+      server:
+        certFile: "/etc/temporal/certs/internode.pem"
+        keyFile: "/etc/temporal/certs/internode-key.pem"
+        clientCaFiles:
+          - "/etc/temporal/certs/ca.pem"
+        requireClientAuth: true
+
+      client:
+        serverName: "*.temporal.staging.internal"
+        rootCaFiles:
+          - "/etc/temporal/certs/ca.pem"
+
+    # Certificate Pinning for Remote Clusters (Phase 2.2)
+    remoteClusters:
+      cluster-standby:
+        client:
+          serverName: "temporal-standby.example.com"
+          rootCaFiles:
+            - "/etc/temporal/certs/remote-ca.pem"
+          pinnedCertificates:
+            enabled: true
+            strictPinning: true
+            fingerprints:
+              # Generate with: openssl x509 -in cert.pem -noout -fingerprint -sha256
+              - "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            description: "Standby cluster certificate (expires 2026-12-31)"
+
+  # Authorization Configuration (Phase 1)
+  authorization:
+    # JWT-based authorization
+    jwtKeyProvider:
+      keySourceURIs:
+        - "https://auth.staging.example.com/.well-known/jwks.json"
+      refreshInterval: "1h"
+
+    permissionsClaimName: "permissions"
+
+    # Authentication Rate Limiting (Phase 2.1)
+    rateLimit:
+      enabled: true
+      maxFailuresPerMinute: 10
+      lockoutDuration: 5m
+
+    # Audit Logging (Phase 3.2)
+    auditLogger:
+      enabled: true
+      outputFormat: json
+      # Audit events will appear in logs with tag: "audit_event":true
+      # Configure log aggregation to send to SIEM
+
+  # Context Timeout Enforcement (Phase 3.4)
+  rpc:
+    timeout:
+      enabled: true
+      defaultTimeout: 60s
+      methodTimeouts:
+        # Configure per-method timeouts
+        "/temporal.api.workflowservice.v1.WorkflowService/StartWorkflowExecution": "10s"
+        "/temporal.api.workflowservice.v1.WorkflowService/GetWorkflowExecutionHistory": "120s"
+        "/temporal.api.workflowservice.v1.WorkflowService/PollWorkflowTaskQueue": "60s"
+        "/temporal.api.workflowservice.v1.WorkflowService/PollActivityTaskQueue": "60s"
+
+  # Namespace-specific Rate Limiting (Phase 1)
+  namespaceRateLimits:
+    # Default limits for all namespaces
+    default:
+      rps: 1000
+
+    # Per-namespace limits
+    production:
+      rps: 5000
+
+    staging:
+      rps: 2000
+
+    development:
+      rps: 100
+
+services:
+  frontend:
+    rpc:
+      grpcPort: 7233
+      membershipPort: 6933
+      bindOnIP: "0.0.0.0"
+      httpPort: 7243
+
+      # HTTP Security Headers (Phase 1)
+      httpHeaders:
+        - "Strict-Transport-Security: max-age=31536000; includeSubDomains"
+        - "X-Content-Type-Options: nosniff"
+        - "X-Frame-Options: DENY"
+        - "Content-Security-Policy: default-src 'none'; frame-ancestors 'none'"
+        - "X-XSS-Protection: 1; mode=block"
+        - "Referrer-Policy: no-referrer"
+
+  matching:
+    rpc:
+      grpcPort: 7235
+      membershipPort: 6935
+      bindOnIP: "0.0.0.0"
+
+  history:
+    rpc:
+      grpcPort: 7234
+      membershipPort: 6934
+      bindOnIP: "0.0.0.0"
+
+  worker:
+    rpc:
+      grpcPort: 7239
+      membershipPort: 6939
+      bindOnIP: "0.0.0.0"
+
+clusterMetadata:
+  enableGlobalNamespace: true
+  failoverVersionIncrement: 10
+  masterClusterName: "staging-primary"
+  currentClusterName: "staging-primary"
+  clusterInformation:
+    staging-primary:
+      enabled: true
+      initialFailoverVersion: 1
+      rpcAddress: "temporal-frontend.staging.example.com:7233"
+      httpAddress: "temporal-frontend.staging.example.com:7243"
+
+    staging-standby:
+      enabled: true
+      initialFailoverVersion: 2
+      rpcAddress: "temporal-standby.example.com:7233"
+      httpAddress: "temporal-standby.example.com:7243"
+
+# Dynamic Configuration Overrides
+dynamicConfigClient:
+  filepath: "/etc/temporal/config/dynamicconfig/staging.yaml"
+  pollInterval: "10s"
+
+# Archival Configuration
+archival:
+  history:
+    state: "enabled"
+    enableRead: true
+    provider:
+      s3:
+        region: "us-west-2"
+        bucket: "temporal-staging-history-archive"
+        # Use IAM roles in production
+
+  visibility:
+    state: "enabled"
+    enableRead: true
+    provider:
+      s3:
+        region: "us-west-2"
+        bucket: "temporal-staging-visibility-archive"
+
+# ============================================================================
+# DEPLOYMENT NOTES
+# ============================================================================
+#
+# Before deploying to staging:
+# 1. Generate TLS certificates (see: docs/operations/CERTIFICATE_ROTATION.md)
+# 2. Configure JWT key provider with staging IdP
+# 3. Update database connection strings
+# 4. Configure Prometheus metrics endpoint
+# 5. Set up log aggregation to SIEM
+# 6. Review SECURITY_CHECKLIST.md
+#
+# Security Features Enabled:
+# ✅ TLS 1.3 with FIPS cipher suites
+# ✅ mTLS for client authentication
+# ✅ JWT-based authorization
+# ✅ Authentication rate limiting (10 failures/min)
+# ✅ Audit logging (JSON format)
+# ✅ Context timeout enforcement (60s default)
+# ✅ Per-namespace rate limiting
+# ✅ Certificate pinning for remote clusters
+# ✅ HTTP security headers
+# ✅ Configuration sanitization (automatic)
+#
+# Monitoring:
+# - Metrics endpoint: http://0.0.0.0:8000/metrics
+# - Security alerts: config/prometheus-alerts.yml
+# - Audit logs: grep '"audit_event":true' /var/log/temporal/*.log
+#
+# Testing Checklist (Week 2):
+# [ ] Verify all services start successfully
+# [ ] Test authentication with valid JWT
+# [ ] Test authentication rate limiting (15 failed attempts)
+# [ ] Verify audit logging captures all events
+# [ ] Test context timeout enforcement
+# [ ] Validate certificate pinning for remote clusters
+# [ ] Load test (1000 req/sec, measure latency)
+# [ ] Verify passwords not logged (configuration sanitization)
+# [ ] Test mTLS client authentication
+# [ ] Verify security metrics in Prometheus
+#
+# Performance Targets:
+# - P95 latency: <50ms (with <2ms overhead from security features)
+# - Throughput: >1000 req/sec
+# - Error rate: <0.1%
+# - Memory overhead: <100MB
+# - CPU overhead: <1%
+#
+# Rollback Procedure:
+# If issues detected, revert to development.yaml configuration
+# and disable security features one at a time to isolate issue.
