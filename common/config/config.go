@@ -729,14 +729,20 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// String converts the config object into a string
+// String converts the config object into a string with all sensitive fields redacted.
+// This ensures that passwords, keys, and tokens are never logged in plaintext.
 func (c *Config) String() string {
-	var buf bytes.Buffer
-	encoder := yaml.NewEncoder(&buf)
-	encoder.SetIndent(2)
-	_ = encoder.Encode(c)
-	maskedYaml, _ := masker.MaskYaml(buf.String(), masker.DefaultYAMLFieldNames)
-	return maskedYaml
+	sanitized, err := SanitizeConfig(c)
+	if err != nil {
+		// Fallback to basic masking if sanitization fails
+		var buf bytes.Buffer
+		encoder := yaml.NewEncoder(&buf)
+		encoder.SetIndent(2)
+		_ = encoder.Encode(c)
+		maskedYaml, _ := masker.MaskYaml(buf.String(), masker.DefaultYAMLFieldNames)
+		return maskedYaml
+	}
+	return sanitized
 }
 
 func (r *GroupTLS) IsServerEnabled() bool {
