@@ -1,0 +1,55 @@
+# Gosec configuration for Temporal Server
+# This file configures the gosec security scanner to reduce false positives
+# while catching real security issues.
+
+# Directories to exclude from scanning
+exclude-dirs:
+  - .bin
+  - .stamp
+  - .testoutput
+  - vendor
+  - mocks
+
+# Exclude generated files
+exclude-generated: true
+
+# Severity threshold - only report issues at or above this severity
+# Options: low, medium, high
+severity: medium
+
+# Confidence threshold - only report issues at or above this confidence
+# Options: low, medium, high
+confidence: medium
+
+# Rules to exclude (G-prefixed IDs)
+# See: https://github.com/securego/gosec#available-rules
+excludes:
+  # G104: Audit errors not checked - too noisy for this codebase
+  # We use golangci-lint's errcheck for this instead
+  - G104
+
+  # G114: Use of net/http serve function - false positives for test servers
+  # Only exclude if test servers are triggering this
+  # - G114
+
+# Rules to include (if not specifying, all rules except excluded are used)
+# Leave empty to use all rules except those in excludes
+includes: []
+
+# Additional configuration
+config:
+  # G101: Look for hardcoded credentials
+  # Configure patterns to search for
+  G101:
+    pattern: "(?i)(password|secret|token|api[_-]?key|private[_-]?key)"
+    ignore_entropy: false
+    entropy_threshold: "80.0"
+    per_char_threshold: "3.0"
+    truncate: "32"
+
+  # G301-G304: File permissions
+  # Allow certain file permissions for legitimate use cases
+  G302:
+    # Allowed file permissions for temporary files
+    # 0600 (owner r/w) is fine for temp files
+    # 0644 (owner r/w, group/other r) is fine for config files
