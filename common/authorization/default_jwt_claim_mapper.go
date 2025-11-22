@@ -85,18 +85,26 @@ func (a *defaultJWTClaimMapper) GetClaims(authInfo *AuthInfo) (*Claims, error) {
 	// unnecessary allocations if the format is correct.
 	parts := strings.SplitN(authInfo.AuthToken, " ", 2)
 	if len(parts) != 2 {
-		return nil, serviceerror.NewPermissionDenied("unexpected authorization token format", "")
+		// Use generic error message to prevent information disclosure about token format
+		a.logger.Warn("invalid authorization token format: expected Bearer token")
+		return nil, serviceerror.NewPermissionDenied("authentication failed", "")
 	}
 	if !strings.EqualFold(parts[0], authorizationBearer) {
-		return nil, serviceerror.NewPermissionDenied("unexpected name in authorization token", "")
+		// Use generic error message to prevent information disclosure about token scheme
+		a.logger.Warn(fmt.Sprintf("invalid authorization scheme: expected Bearer, got %s", parts[0]))
+		return nil, serviceerror.NewPermissionDenied("authentication failed", "")
 	}
 	jwtClaims, err := parseJWTWithAudience(parts[1], a.keyProvider, authInfo.Audience)
 	if err != nil {
-		return nil, err
+		// Log detailed error server-side, return generic error to client
+		a.logger.Warn(fmt.Sprintf("JWT parsing failed: %v", err))
+		return nil, serviceerror.NewPermissionDenied("authentication failed", "")
 	}
 	subject, ok := jwtClaims[headerSubject].(string)
 	if !ok {
-		return nil, serviceerror.NewPermissionDenied("unexpected value type of \"sub\" claim", "")
+		// Use generic error message to prevent information disclosure about claim structure
+		a.logger.Warn("JWT token missing or invalid subject claim")
+		return nil, serviceerror.NewPermissionDenied("authentication failed", "")
 	}
 	claims.Subject = subject
 	permissions, ok := jwtClaims[a.permissionsClaimName].([]interface{})
@@ -165,7 +173,8 @@ func parseJWTWithAudience(tokenString string, keyProvider TokenKeyProvider, audi
 		keyFunc = func(token *jwt.Token) (interface{}, error) {
 			kid, ok := token.Header["kid"].(string)
 			if !ok {
-				return nil, fmt.Errorf("malformed token - no \"kid\" header")
+				// Generic error - detailed info will be logged by caller
+				return nil, fmt.Errorf("invalid token")
 			}
 			alg := token.Header["alg"].(string)
 			switch token.Method.(type) {
@@ -176,8 +185,8 @@ func parseJWTWithAudience(tokenString string, keyProvider TokenKeyProvider, audi
 			case *jwt.SigningMethodECDSA:
 				return keyProvider.EcdsaKey(alg, kid)
 			default:
-				return nil, serviceerror.NewPermissionDenied(
-					fmt.Sprintf("unexpected signing method: %v for algorithm: %v", token.Method, token.Header["alg"]), "")
+				// Generic error - detailed info will be logged by caller
+				return nil, serviceerror.NewPermissionDenied("invalid token", "")
 			}
 		}
 	}
@@ -185,17 +194,19 @@ func parseJWTWithAudience(tokenString string, keyProvider TokenKeyProvider, audi
 	token, err := parser.Parse(tokenString, keyFunc)
 
 	if err != nil {
-		return nil, err
+		// Return a wrapped generic error
+		return nil, fmt.Errorf("token validation failed: %w", err)
 	}
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
-		return nil, serviceerror.NewPermissionDenied("invalid token with no claims", "")
+		return nil, serviceerror.NewPermissionDenied("invalid token", "")
 	}
 	if err := claims.Valid(); err != nil {
-		return nil, err
+		// Generic error wrapping the actual validation error
+		return nil, fmt.Errorf("token validation failed: %w", err)
 	}
 	if strings.TrimSpace(audience) != "" && !claims.VerifyAudience(audience, true) {
-		return nil, serviceerror.NewPermissionDenied("audience mismatch", "")
+		return nil, serviceerror.NewPermissionDenied("invalid token", "")
 	}
 	return claims, nil
 }

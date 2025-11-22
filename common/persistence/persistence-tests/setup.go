@@ -9,16 +9,25 @@ import (
 )
 
 const (
-	testMySQLUser      = "temporal"
-	testMySQLPassword  = "temporal"
+	// ============================================================================
+	// SECURITY WARNING: TEST CREDENTIALS ONLY - DO NOT USE IN PRODUCTION
+	// ============================================================================
+	// These credentials are ONLY for automated testing and development.
+	// They represent WEAK credentials that should NEVER be used in production.
+	// In production, use strong, randomly-generated passwords from a secrets
+	// management system (e.g., HashiCorp Vault, AWS Secrets Manager).
+	// ============================================================================
+
+	testMySQLUser      = "temporal" // TEST ONLY - DO NOT USE IN PRODUCTION
+	testMySQLPassword  = "temporal" // TEST ONLY - WEAK PASSWORD - DO NOT USE IN PRODUCTION
 	testMySQLSchemaDir = "schema/mysql/v8"
 
-	testPostgreSQLUser      = "temporal"
-	testPostgreSQLPassword  = "temporal"
+	testPostgreSQLUser      = "temporal" // TEST ONLY - DO NOT USE IN PRODUCTION
+	testPostgreSQLPassword  = "temporal" // TEST ONLY - WEAK PASSWORD - DO NOT USE IN PRODUCTION
 	testPostgreSQLSchemaDir = "schema/postgresql/v12"
 
-	testSQLiteUser      = ""
-	testSQLitePassword  = ""
+	testSQLiteUser      = "" // TEST ONLY
+	testSQLitePassword  = "" // TEST ONLY
 	testSQLiteMode      = "memory"
 	testSQLiteCache     = "private"
 	testSQLiteSchemaDir = "schema/sqlite/v3" // specify if mode is not "memory"

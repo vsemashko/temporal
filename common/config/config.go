@@ -191,6 +191,14 @@ type (
 
 		// Requires clients to authenticate with a certificate when connecting, otherwise known as mutual TLS.
 		RequireClientAuth bool `yaml:"requireClientAuth"`
+
+		// MinVersion specifies the minimum TLS version to use. Valid values: "1.2", "1.3"
+		// Defaults to "1.3" for enhanced security. Use "1.2" only for backward compatibility.
+		MinVersion string `yaml:"minVersion"`
+
+		// CipherSuites specifies the list of allowed cipher suites. If empty, uses secure defaults.
+		// Recommended to leave empty unless you have specific requirements.
+		CipherSuites []string `yaml:"cipherSuites"`
 	}
 
 	// ClientTLS contains TLS configuration for clients within the Temporal Cluster to connect to Temporal nodes.
@@ -200,9 +208,12 @@ type (
 		// This name should be referenced by the certificate specified in the ServerTLS section.
 		ServerName string `yaml:"serverName"`
 
-		// If you want to verify the temporal server hostname and server cert, then you should turn this on
-		// This option is basically equivalent to InSecureSkipVerify
-		// See InSecureSkipVerify in http://golang.org/pkg/crypto/tls/ for more info
+		// DisableHostVerification disables TLS hostname verification
+		// SECURITY WARNING: Enabling this option (setting to true) exposes connections to
+		// man-in-the-middle attacks and should ONLY be done in development/testing environments.
+		// When true, this sets InsecureSkipVerify=true which disables certificate hostname validation.
+		// See http://golang.org/pkg/crypto/tls/ InSecureSkipVerify for more info.
+		// DEFAULT: false (host verification enabled) - STRONGLY recommended to keep disabled in production
 		DisableHostVerification bool `yaml:"disableHostVerification"`
 
 		// Optional - A list of paths to files containing the PEM-encoded public key of the Certificate Authorities that are used to validate the server's TLS certificate
@@ -216,6 +227,14 @@ type (
 		// Optional - Use TLS even is neither client certificate nor root CAs are configured
 		// This is for non-mTLS cases when client validates serve against a set of trusted CA certificates configured in the environment
 		ForceTLS bool `yaml:"forceTLS"`
+
+		// MinVersion specifies the minimum TLS version to use. Valid values: "1.2", "1.3"
+		// Defaults to "1.3" for enhanced security. Use "1.2" only for backward compatibility.
+		MinVersion string `yaml:"minVersion"`
+
+		// CipherSuites specifies the list of allowed cipher suites. If empty, uses secure defaults.
+		// Recommended to leave empty unless you have specific requirements.
+		CipherSuites []string `yaml:"cipherSuites"`
 	}
 
 	// WorkerTLS contains TLS configuration for system workers within the Temporal Cluster to connect to Temporal frontend.

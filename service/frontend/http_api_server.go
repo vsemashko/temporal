@@ -227,6 +227,15 @@ func (h *HTTPAPIServer) GracefulStop(gracefulDrainTime time.Duration) {
 }
 
 func (h *HTTPAPIServer) serveHTTP(w http.ResponseWriter, r *http.Request) {
+	// Add security headers to all HTTP responses
+	// These headers help protect against common web vulnerabilities
+	w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("X-Frame-Options", "DENY")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+	w.Header().Set("X-XSS-Protection", "1; mode=block")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+
 	// Limit the request body to max gRPC size. This is hardcoded to 4MB at the
 	// moment using gRPC's default at
 	// https://github.com/grpc/grpc-go/blob/0673105ebcb956e8bf50b96e28209ab7845a65ad/server.go#L58
