@@ -13,9 +13,12 @@
 3. [Authorization Configuration](#authorization-configuration)
    - [Authentication Rate Limiting](#authentication-rate-limiting)
 4. [Security Best Practices](#security-best-practices)
+   - [Certificate Management](#certificate-management)
+   - [Certificate Rotation](#certificate-rotation)
 5. [Migration Guide](#migration-guide)
 6. [Troubleshooting](#troubleshooting)
 7. [Security Checklist](#security-checklist)
+8. [Operational Guides](#operational-guides)
 
 ---
 
@@ -545,7 +548,31 @@ chown temporal:temporal /etc/temporal/certs/*-key.pem
 
 #### Certificate Rotation
 
-Temporal supports zero-downtime certificate rotation:
+Temporal supports zero-downtime certificate rotation.
+
+**📘 Complete Rotation Guides:**
+
+For detailed certificate and secrets rotation procedures, see:
+
+- **[Certificate Rotation Guide](docs/operations/CERTIFICATE_ROTATION.md)** - Comprehensive TLS certificate rotation procedures
+  - Zero-downtime rotation process
+  - Emergency rotation procedures
+  - Automated rotation strategies
+  - Troubleshooting and validation
+
+- **[JWT Key Rotation Guide](docs/operations/JWT_KEY_ROTATION.md)** - JWT signing key rotation procedures
+  - Dual-key period strategy
+  - Emergency key rotation
+  - IdP integration examples
+  - Monitoring and validation
+
+- **[Secrets Rotation Runbook](docs/operations/SECRETS_ROTATION_RUNBOOK.md)** - Quick reference for rotation procedures
+  - Emergency quick links
+  - Step-by-step commands
+  - Validation checklists
+  - Rollback procedures
+
+**Quick Reference - Certificate Rotation:**
 
 1. Place new certificates in the certificate directory
 2. Temporal automatically reloads based on `refreshInterval`
@@ -903,6 +930,107 @@ If a security incident is detected:
 - Security team: security@example.com
 - On-call engineer: oncall@example.com
 - Incident commander: incidents@example.com
+
+---
+
+## Operational Guides
+
+This section provides links to comprehensive operational guides for security-related procedures.
+
+### Secrets Rotation Documentation
+
+**NEW: Phase 2 Enhancement**
+
+Comprehensive guides for rotating TLS certificates and JWT signing keys:
+
+#### 📖 [Certificate Rotation Guide](docs/operations/CERTIFICATE_ROTATION.md)
+
+Complete procedures for rotating TLS certificates with zero downtime:
+
+- **Standard Rotation**: 5-phase process for planned rotation
+- **Emergency Rotation**: Fast-track procedure for compromised certificates
+- **Automated Rotation**: Scripts and tools for automation
+- **Validation**: Step-by-step verification procedures
+- **Troubleshooting**: Common issues and solutions
+- **Rollback**: Procedures for reverting failed rotations
+
+**Use this guide when:**
+- Certificates are approaching expiration (< 30 days)
+- Migrating to new Certificate Authority
+- Responding to certificate compromise
+- Upgrading to stronger algorithms
+
+#### 📖 [JWT Key Rotation Guide](docs/operations/JWT_KEY_ROTATION.md)
+
+Complete procedures for rotating JWT signing keys:
+
+- **Dual-Key Strategy**: Zero-downtime rotation using multiple keys
+- **Timeline Planning**: Calculate wait periods based on token TTL
+- **IdP Integration**: Examples for common identity providers
+- **Emergency Rotation**: Rapid response to key compromise
+- **Validation**: Verify rotation success
+- **Automation**: Scheduled rotation scripts
+
+**Use this guide when:**
+- JWT keys are approaching rotation schedule (every 90 days)
+- Changing signing algorithms
+- Responding to key compromise
+- Integrating with new identity provider
+
+#### 📖 [Secrets Rotation Runbook](docs/operations/SECRETS_ROTATION_RUNBOOK.md)
+
+Quick reference guide for on-call engineers:
+
+- **Emergency Quick Links**: Jump directly to emergency procedures
+- **Cheat Sheet Commands**: Copy-paste ready commands
+- **Validation Checklists**: Ensure rotation success
+- **Rollback Procedures**: Quick rollback if issues occur
+- **Troubleshooting**: Common problems and fixes
+- **Contact Information**: Escalation paths
+
+**Use this guide when:**
+- Need quick reference during rotation
+- Responding to security incident
+- Training new team members
+- Creating runbook automation
+
+### Rotation Best Practices
+
+1. **Schedule Regular Rotations**
+   - TLS Certificates: Rotate 30 days before expiration
+   - JWT Keys: Rotate every 90 days
+   - Emergency Keys: Have pre-generated backup keys
+
+2. **Test in Staging First**
+   - Always test rotation procedures in non-production
+   - Validate all scripts before production use
+   - Document any environment-specific variations
+
+3. **Monitor During Rotation**
+   - Watch error rates during dual-key periods
+   - Monitor certificate expiration metrics
+   - Alert on authentication failures
+
+4. **Maintain Backups**
+   - Always backup before rotation
+   - Keep old certificates for 90 days
+   - Test backup restoration quarterly
+
+5. **Document Everything**
+   - Log all rotation activities
+   - Track certificate/key inventory
+   - Update rotation schedule after each rotation
+
+### Quick Links
+
+| Scenario | Guide | Estimated Time |
+|----------|-------|----------------|
+| Planned certificate rotation | [Certificate Rotation](docs/operations/CERTIFICATE_ROTATION.md) | 5-7 days |
+| Planned JWT key rotation | [JWT Key Rotation](docs/operations/JWT_KEY_ROTATION.md) | 25-48 hours |
+| Emergency certificate rotation | [Secrets Runbook - Emergency](docs/operations/SECRETS_ROTATION_RUNBOOK.md#emergency-certificate-rotation) | < 2 hours |
+| Emergency JWT key rotation | [Secrets Runbook - Emergency](docs/operations/SECRETS_ROTATION_RUNBOOK.md#emergency-jwt-key-rotation) | < 1 hour |
+| Validate rotation success | [Secrets Runbook - Validation](docs/operations/SECRETS_ROTATION_RUNBOOK.md#validation-checks) | 15 minutes |
+| Rollback failed rotation | [Secrets Runbook - Rollback](docs/operations/SECRETS_ROTATION_RUNBOOK.md#rollback-procedures) | 10 minutes |
 
 ---
 
