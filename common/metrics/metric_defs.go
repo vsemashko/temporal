@@ -21,6 +21,8 @@ const (
 	nexusEndpointTagName        = "nexus_endpoint"
 	nexusServiceTagName         = "nexus_service"
 	nexusOperationTagName       = "nexus_operation"
+	rpcMethodTagName            = "rpc_method"
+	timeoutTagName              = "timeout"
 	outcomeTagName              = "outcome"
 	versionedTagName            = "versioned"
 	resourceExhaustedTag        = "resource_exhausted_cause"
@@ -643,6 +645,8 @@ var (
 	CertPinValidationSuccess                 = NewCounterDef("cert_pin_validation_success")
 	CertPinValidationFailure                 = NewCounterDef("cert_pin_validation_failure")
 	CertPinConfiguredClusters                = NewGaugeDef("cert_pin_configured_clusters")
+	ServiceRequestTimeoutEnforced            = NewCounterDef("service_request_timeout_enforced")
+	ServiceRequestTimeoutExceeded            = NewCounterDef("service_request_timeout_exceeded")
 	EventBlobSize                            = NewBytesHistogramDef("event_blob_size")
 	LockRequests                             = NewCounterDef("lock_requests")
 	LockLatency                              = NewTimerDef("lock_latency")

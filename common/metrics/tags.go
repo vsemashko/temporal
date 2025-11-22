@@ -339,6 +339,16 @@ func NexusOperationTag(value string) Tag {
 	return Tag{Key: nexusOperationTagName, Value: value}
 }
 
+// MethodTag returns a new RPC method tag for tracking method-specific metrics
+func MethodTag(value string) Tag {
+	return Tag{Key: rpcMethodTagName, Value: value}
+}
+
+// TimeoutTag returns a new timeout tag for tracking timeout values
+func TimeoutTag(value string) Tag {
+	return Tag{Key: timeoutTagName, Value: value}
+}
+
 // HttpStatusTag returns a new httpStatusTag.
 func HttpStatusTag(value int) Tag {
 	return Tag{Key: httpStatusTagName, Value: strconv.Itoa(value)}
