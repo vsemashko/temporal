@@ -11,6 +11,7 @@
 1. [Introduction](#introduction)
 2. [TLS Configuration](#tls-configuration)
 3. [Authorization Configuration](#authorization-configuration)
+   - [Authentication Rate Limiting](#authentication-rate-limiting)
 4. [Security Best Practices](#security-best-practices)
 5. [Migration Guide](#migration-guide)
 6. [Troubleshooting](#troubleshooting)
@@ -301,6 +302,204 @@ global:
 - Staging environments with real data
 - Any environment accessible from the internet
 - Any environment with compliance requirements
+
+### Authentication Rate Limiting
+
+**NEW: Phase 2 Enhancement**
+
+Authentication rate limiting protects against brute force attacks by tracking failed authentication attempts and temporarily locking out IP addresses that exceed the failure threshold.
+
+#### How It Works
+
+1. **Failure Tracking**: Each failed authentication attempt is tracked by client IP address
+2. **Sliding Window**: Failures are counted within a 1-minute sliding window
+3. **Lockout**: When an IP exceeds the threshold, it's locked out for a configured duration
+4. **Success Reset**: Successful authentication clears all tracked failures for that IP
+5. **Automatic Cleanup**: Old tracking data is automatically removed to prevent memory growth
+
+#### Configuration
+
+```yaml
+global:
+  authorization:
+    rateLimit:
+      # Enable authentication rate limiting (recommended for production)
+      enabled: true
+
+      # Maximum failed authentication attempts per minute before lockout
+      # Default: 10
+      # Recommended: 5-10 for production, lower for high-security environments
+      maxFailuresPerMinute: 10
+
+      # Duration to lock out an IP after exceeding the threshold
+      # Default: 5m
+      # Recommended: 5m-15m (longer for high-security environments)
+      lockoutDuration: 5m
+```
+
+#### Example Configurations
+
+**High Security Environment:**
+```yaml
+global:
+  authorization:
+    rateLimit:
+      enabled: true
+      maxFailuresPerMinute: 3
+      lockoutDuration: 15m
+```
+
+**Standard Production:**
+```yaml
+global:
+  authorization:
+    rateLimit:
+      enabled: true
+      maxFailuresPerMinute: 10
+      lockoutDuration: 5m
+```
+
+**Development (Disabled):**
+```yaml
+global:
+  authorization:
+    rateLimit:
+      enabled: false
+```
+
+#### Monitoring
+
+Monitor these metrics to track authentication security:
+
+**Metrics:**
+- `auth_failure_total` - Total authentication failures
+- `auth_rate_limited_total` - Requests blocked by rate limiting
+- `auth_lockout_total` - IP addresses locked out
+- `auth_tracked_ips` - Current number of IPs being tracked
+- `auth_tracker_overflow` - Attempts to track when limit reached
+
+**Example Prometheus Queries:**
+```promql
+# Authentication failure rate
+rate(auth_failure_total[5m])
+
+# Lockout events
+increase(auth_lockout_total[1h])
+
+# Currently tracked IPs
+auth_tracked_ips
+
+# Rate limiting effectiveness
+rate(auth_rate_limited_total[5m]) / rate(auth_failure_total[5m])
+```
+
+#### Alerting Recommendations
+
+Set up alerts for security events:
+
+```yaml
+# High authentication failure rate
+- alert: HighAuthFailureRate
+  expr: rate(auth_failure_total[5m]) > 10
+  for: 5m
+  annotations:
+    summary: "High authentication failure rate detected"
+
+# Many IPs being locked out (possible attack)
+- alert: MassiveBruteForceAttempt
+  expr: rate(auth_lockout_total[5m]) > 5
+  for: 5m
+  annotations:
+    summary: "Multiple IPs being locked out - possible distributed attack"
+
+# Tracker overflow (may need to increase limit)
+- alert: AuthTrackerOverflow
+  expr: rate(auth_tracker_overflow[5m]) > 1
+  for: 5m
+  annotations:
+    summary: "Auth rate limiter tracker overflow"
+```
+
+#### Operational Considerations
+
+**IP Extraction:**
+- Rate limiting uses the client IP address from gRPC peer context
+- Works correctly with direct connections
+- With load balancers/proxies, ensure `X-Forwarded-For` headers are properly configured
+- If IP cannot be extracted, requests are allowed (fail-open behavior)
+
+**Memory Usage:**
+- Each tracked IP uses approximately 64 bytes
+- Default limit: 10,000 IPs tracked = ~640 KB memory
+- Old tracking data is automatically cleaned up every 10 minutes
+- IPs are removed when: lockout expires AND no failures for 10+ minutes
+
+**Performance Impact:**
+- Minimal overhead: RWMutex for thread safety
+- Read lock for checking lockouts (fast path)
+- Write lock only for recording failures (slow path)
+- No database queries - all in-memory
+
+**False Positives:**
+- NAT/CGNAT scenarios: Multiple users behind same IP may trigger lockouts
+- Corporate networks: Large offices sharing one external IP
+- Consider higher thresholds or disabling for known internal IPs
+- Monitor `auth_lockout_total` for patterns
+
+#### Troubleshooting
+
+**Users reporting authentication failures:**
+
+1. Check if IP is locked out:
+```bash
+# Search logs for the user's IP
+grep "IP locked out" temporal.log | grep "192.168.1.100"
+```
+
+2. Check metrics for that IP's failure count:
+```promql
+auth_tracked_ips{ip="192.168.1.100"}
+```
+
+3. Temporary mitigation:
+   - Restart Temporal server (clears all tracking data)
+   - Or wait for lockout duration to expire
+   - Or increase `maxFailuresPerMinute` temporarily
+
+**Legitimate traffic being blocked:**
+
+Possible causes:
+- NAT/CGNAT: Multiple users sharing IP
+- Misconfigured clients: Retrying with wrong credentials
+- Password sync issues: Old credentials being used
+
+Solutions:
+- Increase `maxFailuresPerMinute` threshold
+- Increase `lockoutDuration` (counter-intuitive but reduces frequency of lockouts)
+- Fix underlying authentication issues
+- Consider IP whitelisting for known internal ranges (future enhancement)
+
+**Rate limiter not working:**
+
+Check configuration:
+```yaml
+# Ensure enabled is true
+global:
+  authorization:
+    rateLimit:
+      enabled: true  # Must be explicitly true
+```
+
+Check logs for warnings:
+```bash
+grep "auth rate limit" temporal.log
+```
+
+Verify interceptor is loaded:
+```bash
+# Should see "AuthRateLimitInterceptor" in startup logs
+grep "AuthRateLimitInterceptor" temporal.log
+```
 
 ---
 
